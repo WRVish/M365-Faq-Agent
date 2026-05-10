@@ -33,57 +33,7 @@ Everything you need to build and deploy this is available in multiple places:
 
 **🌐 [Blog Post: Building an M365 FAQ Agent](<placeholder>)** — Complete implementation guide with explanations of concepts and architecture decisions (external link).
 
----
 
-## What's in This Repo
-
-```
-├── README.md                                # This file
-├── .gitignore                               # Files excluded from version control
-│
-├── docs/                                    # Documentation and guides
-│   ├── solution-design-document.md          # Full technical architecture, topics, and flows
-│   ├── step-by-step-guide.md                # Step-by-step deployment guide with screenshots
-│   └── blog-content.html                    # Blog post HTML content
-│
-├── assets/                                  # Media files
-│   ├── images/                              # Screenshots and diagrams
-│   │   ├── agent-config-and-instruction.png
-│   │   ├── choose-knowledge-source.png
-│   │   ├── custom-topics.png
-│   │   ├── generative-ai-settings.png
-│   │   ├── greeting-topic.png
-│   │   ├── greeting-topic-condition.png
-│   │   ├── knowledge-source-list.png
-│   │   └── sharepoint-faq-lists.png
-│   └── videos/                              # Demo videos
-│       └── agent-testing-demo.mov           # Agent testing demonstration
-│
-├── packages/                                # Solution packages
-│   └── m365-faq-agent-1.0.0.1.zip           # Unmanaged Power Platform solution export
-│
-├── ListCreation-Sampledata/                 # SharePoint list creation scripts
-│   ├── Create-FAQ-Lists.ps1                 # PowerShell script to create all FAQ lists
-│   ├── Create-EscalationLog-List.ps1        # PowerShell script to create escalation log list
-│   └── list-column-definitions.json         # List schema and column definitions
-│
-├── ListDataLoad-Sampledata/                 # Sample FAQ data ready to import
-│   ├── FAQ_Teams_sample.csv                 # Sample Teams FAQ items
-│   ├── FAQ_SharePoint_sample.csv            # Sample SharePoint FAQ items
-│   ├── FAQ_PowerApps_sample.csv             # Sample Power Apps FAQ items
-│   ├── FAQ_PowerAutomate_sample.csv         # Sample Power Automate FAQ items
-│   ├── FAQ_PowerPlatform_sample.csv         # Sample Power Platform FAQ items
-│   └── FAQ_NonM365_sample.csv               # Sample non-M365 tools FAQ items
-│
-├── power-automate/                          # Power Automate flows
-│   ├── EscalateToTeams-flow.zip             # Main escalation flow export
-│   └── flow-setup-guide.md                  # Flow configuration and formulas
-│
-└── agent-config/                            # Agent configuration
-    └── agent-instructions.txt               # Agent system instructions and behaviour
-```
-
----
 
 ## Quick Start
 
