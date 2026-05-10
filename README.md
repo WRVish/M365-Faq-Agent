@@ -28,11 +28,10 @@ Most support teams answer the same M365 questions over and over. This agent fixe
 
 Everything you need to build and deploy this is available in multiple places:
 
-**📄 [Solution Design Document](./docs/solution-design-document.md)** — Full technical architecture, topics, flows, and deployment guide.
 
 **📚 [Step-by-Step Setup Guide](./docs/step-by-step-guide.md)** — Detailed walkthrough with screenshots for each deployment step.
 
-**🌐 [Blog Post: Building an M365 FAQ Agent](https://www.wrvishnu.com/copilot-studio-faq-agent)** — Complete implementation guide with explanations of concepts and architecture decisions (external link).
+**🌐 [Blog Post: Building an M365 FAQ Agent](<placeholder>)** — Complete implementation guide with explanations of concepts and architecture decisions (external link).
 
 ---
 
