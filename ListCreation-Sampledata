@@ -1,0 +1,362 @@
+ <#
+.SYNOPSIS
+    FAQ Hub — List Provisioning + Smoke Test
+    ISE-compatible: no Write-Progress, no pipeline prompts, explicit error display.
+
+.USAGE
+    1. Open this file in PowerShell ISE
+    2. Change $SiteUrl below to your site
+    3. Press F5 to run
+
+.NOTES
+    Requires: Install-Module PnP.PowerShell -Scope CurrentUser
+              (run that line once in the ISE console pane first)
+#>
+
+# ── SET YOUR SITE URL HERE ─────────────────────────────────────────────────────
+$SiteUrl = "https://vishtechtalk.sharepoint.com/sites/DemoSite"
+# ─────────────────────────────────────────────────────────────────────────────
+
+$DefaultOwner  = "it-admin@contoso.com"   # change to a real UPN
+$ReviewedDate  = "2026-05-07"
+
+Set-StrictMode -Off
+$ErrorActionPreference = "Continue"       # ISE: don't hard-stop on non-fatal errors
+
+# Import SharePointPnPPowerShellOnline (PS 5.1 compatible)
+if (-not (Get-Module -Name "SharePointPnPPowerShellOnline")) {
+    Write-Host "  Importing SharePointPnPPowerShellOnline..." -ForegroundColor Yellow
+    Import-Module SharePointPnPPowerShellOnline -Force -WarningAction SilentlyContinue
+    Write-Host "  Module loaded." -ForegroundColor Green
+}
+
+#region ── Helpers ────────────────────────────────────────────────────────────
+
+function Log-Head { param([string]$t)
+    Write-Host "`n$('='*65)" -ForegroundColor Cyan
+    Write-Host "  $t"        -ForegroundColor Cyan
+    Write-Host "$('='*65)"   -ForegroundColor Cyan
+}
+function Log-OK   { param([string]$t) Write-Host "  [OK]   $t" -ForegroundColor Green  }
+function Log-Warn { param([string]$t) Write-Host "  [WARN] $t" -ForegroundColor Yellow }
+function Log-Err  { param([string]$t) Write-Host "  [ERR]  $t" -ForegroundColor Red    }
+function Log-Info { param([string]$t) Write-Host "  [....] $t" -ForegroundColor White  }
+
+#endregion
+
+#region ── Column Definitions ─────────────────────────────────────────────────
+
+# FAQ schema shared across all product lists
+$FAQ_Cols = @(
+    @{ Name="Answer";       Type="Note";     Required=$true  }
+    @{ Name="Product";      Type="Text";     Required=$true  }
+    @{ Name="Category";     Type="Choice";   Required=$true ;
+       Choices=@("Setup","Access","Troubleshoot","Policy","Licensing","Administration") }
+    @{ Name="Audience";     Type="Choice";   Required=$true ;
+       Choices=@("End User","IT Admin","Site Admin","Developer","All") }
+    @{ Name="Keywords";     Type="Note";     Required=$false }
+    @{ Name="Confidence";   Type="Number";   Required=$true  }
+    @{ Name="LastReviewed"; Type="DateTime"; Required=$false }
+    @{ Name="Owner";        Type="Text";     Required=$false }
+    @{ Name="Tags";         Type="Text";     Required=$false }
+    @{ Name="Version";      Type="Number";   Required=$false }
+)
+
+# Analytics schema
+$Analytics_Cols = @(
+    @{ Name="QueryDate";           Type="DateTime"; Required=$true  }
+    @{ Name="Product";             Type="Text";     Required=$true  }
+    @{ Name="ResolutionStatus";    Type="Choice";   Required=$true ;
+       Choices=@("resolved","escalated","no_match") }
+    @{ Name="ConfidenceScore";     Type="Number";   Required=$false }
+    @{ Name="MatchedFAQItemId";    Type="Number";   Required=$false }
+    @{ Name="MatchedFAQTitle";     Type="Text";     Required=$false }
+    @{ Name="EscalationTicketRef"; Type="Text";     Required=$false }
+    @{ Name="UserId";              Type="Text";     Required=$false }
+    @{ Name="SessionId";           Type="Text";     Required=$false }
+    @{ Name="SatisfactionScore";   Type="Number";   Required=$false }
+    @{ Name="StaleContentFlagged"; Type="Boolean";  Required=$false }
+    @{ Name="ChannelSource";       Type="Choice";   Required=$false ;
+       Choices=@("teams_chat","teams_channel","sharepoint_webpart","other") }
+    @{ Name="ResponseTimeMs";      Type="Number";   Required=$false }
+)
+
+#endregion
+
+#region ── Functions ──────────────────────────────────────────────────────────
+
+function Add-FAQColumns {
+    param([string]$ListName, [array]$Cols)
+
+    foreach ($col in $Cols) {
+        $existing = Get-PnPField -List $ListName -Identity $col.Name -ErrorAction SilentlyContinue
+        if ($null -ne $existing) {
+            Log-Warn "  Column already exists, skipping: $($col.Name)"
+            continue
+        }
+
+        try {
+            switch ($col.Type) {
+                "Choice" {
+                    # Build choice XML — safest cross-version approach for PnP
+                    $choiceNodes = ($col.Choices | ForEach-Object { "<CHOICE>$_</CHOICE>" }) -join ""
+                    $req = if ($col.Required) { "TRUE" } else { "FALSE" }
+                    $xml = "<Field Type='Choice' Name='$($col.Name)' " +
+                           "DisplayName='$($col.Name)' Required='$req'>" +
+                           "<CHOICES>$choiceNodes</CHOICES></Field>"
+                    Add-PnPFieldFromXml -List $ListName -FieldXml $xml | Out-Null
+                }
+                "Boolean" {
+                    # Boolean via XML — Add-PnPField -Type Boolean is unreliable in some PnP builds
+                    $req = if ($col.Required) { "TRUE" } else { "FALSE" }
+                    $xml = "<Field Type='Boolean' Name='$($col.Name)' " +
+                           "DisplayName='$($col.Name)' Required='$req'><Default>0</Default></Field>"
+                    Add-PnPFieldFromXml -List $ListName -FieldXml $xml | Out-Null
+                }
+                "Note" {
+                    Add-PnPField -List $ListName -DisplayName $col.Name `
+                        -InternalName $col.Name -Type Note `
+                        -Required:([bool]$col.Required) -ErrorAction Stop | Out-Null
+                }
+                "DateTime" {
+                    Add-PnPField -List $ListName -DisplayName $col.Name `
+                        -InternalName $col.Name -Type DateTime `
+                        -Required:([bool]$col.Required) -ErrorAction Stop | Out-Null
+                }
+                "Number" {
+                    Add-PnPField -List $ListName -DisplayName $col.Name `
+                        -InternalName $col.Name -Type Number `
+                        -Required:([bool]$col.Required) -ErrorAction Stop | Out-Null
+                }
+                default {
+                    Add-PnPField -List $ListName -DisplayName $col.Name `
+                        -InternalName $col.Name -Type Text `
+                        -Required:([bool]$col.Required) -ErrorAction Stop | Out-Null
+                }
+            }
+            Log-OK "  Column added: $($col.Name) [$($col.Type)]"
+        }
+        catch {
+            Log-Err "  Column FAILED: $($col.Name) — $($_.Exception.Message)"
+        }
+    }
+}
+
+
+function New-FAQList {
+    param([string]$ListName, [array]$Cols)
+
+    Log-Info "Checking list: $ListName"
+
+    $lst = Get-PnPList -Identity $ListName -ErrorAction SilentlyContinue
+    if ($null -eq $lst) {
+        try {
+            New-PnPList -Title $ListName -Template GenericList -OnQuickLaunch:$false `
+                        -ErrorAction Stop | Out-Null
+            Log-OK "List created: $ListName"
+        }
+        catch {
+            Log-Err "Could not create list '$ListName': $($_.Exception.Message)"
+            return   # skip column work if list creation failed
+        }
+    }
+    else {
+        Log-Warn "List exists: $ListName — will only add missing columns"
+    }
+
+    Add-FAQColumns -ListName $ListName -Cols $Cols
+}
+
+
+function Add-ListItem {
+    # Wraps Add-PnPListItem with a clear success/fail log
+    param([string]$ListName, [hashtable]$Values)
+    try {
+        Add-PnPListItem -List $ListName -Values $Values -ErrorAction Stop | Out-Null
+        Log-OK "Item added to $ListName : $($Values['Title'])"
+    }
+    catch {
+        Log-Err "Item FAILED in $ListName : $($Values['Title']) — $($_.Exception.Message)"
+    }
+}
+
+#endregion
+
+#region ── List + Test Data Map ───────────────────────────────────────────────
+
+# Each entry: ListName, Cols ref, and 2 smoke-test items
+$Lists = @(
+
+    @{
+        Name = "FAQ_SharePoint"
+        Cols = $FAQ_Cols
+        Items = @(
+            @{
+                Title        = "How do I create a new SharePoint site?"
+                Answer       = "Go to sharepoint.com and click '+ Create site'. Choose Team site or Communication site."
+                Product      = "SharePoint Online"; Category = "Setup"; Audience = "End User"
+                Keywords     = "create site, new site"; Confidence = 5
+                LastReviewed = $ReviewedDate; Owner = $DefaultOwner; Tags = ""; Version = 1
+            },
+            @{
+                Title        = "How do I share a file with an external user?"
+                Answer       = "Click the three dots next to the file > Share. Change the link scope to 'Specific people' or 'Anyone with the link'."
+                Product      = "SharePoint Online"; Category = "Access"; Audience = "End User"
+                Keywords     = "share external, guest link"; Confidence = 5
+                LastReviewed = $ReviewedDate; Owner = $DefaultOwner; Tags = ""; Version = 1
+            }
+        )
+    },
+
+    @{
+        Name = "FAQ_Teams"
+        Cols = $FAQ_Cols
+        Items = @(
+            @{
+                Title        = "How do I create a new Microsoft Teams team?"
+                Answer       = "Click Teams in the left rail > '+ Join or create a team' > Create team. Choose Public or Private."
+                Product      = "Teams"; Category = "Setup"; Audience = "End User"
+                Keywords     = "create team, new team"; Confidence = 5
+                LastReviewed = $ReviewedDate; Owner = $DefaultOwner; Tags = ""; Version = 1
+            },
+            @{
+                Title        = "How do I share my screen in a Teams meeting?"
+                Answer       = "Click the Share icon in the meeting toolbar and choose Desktop, Window, or Browser tab."
+                Product      = "Teams"; Category = "Setup"; Audience = "End User"
+                Keywords     = "screen share, present"; Confidence = 5
+                LastReviewed = $ReviewedDate; Owner = $DefaultOwner; Tags = ""; Version = 1
+            }
+        )
+    },
+
+    @{
+        Name = "FAQ_PowerPlatform"
+        Cols = $FAQ_Cols
+        Items = @(
+            @{
+                Title        = "What is the Microsoft Power Platform?"
+                Answer       = "Power Platform is Microsoft's low-code suite: Power Apps, Power Automate, Power BI, Power Pages, and Copilot Studio."
+                Product      = "Power Platform"; Category = "Setup"; Audience = "All"
+                Keywords     = "overview, low code, suite"; Confidence = 5
+                LastReviewed = $ReviewedDate; Owner = $DefaultOwner; Tags = ""; Version = 1
+            },
+            @{
+                Title        = "How do I create a Power Platform environment?"
+                Answer       = "Go to admin.powerplatform.microsoft.com > Environments > + New. Choose type: Production, Sandbox, Trial, or Developer."
+                Product      = "Power Platform"; Category = "Setup"; Audience = "IT Admin"
+                Keywords     = "create environment, sandbox"; Confidence = 4
+                LastReviewed = $ReviewedDate; Owner = $DefaultOwner; Tags = ""; Version = 1
+            }
+        )
+    },
+
+    @{
+        Name = "FAQ_PowerApps"
+        Cols = $FAQ_Cols
+        Items = @(
+            @{
+                Title        = "How do I create a canvas app from a SharePoint list?"
+                Answer       = "Open the list > Integrate > Power Apps > Create an app. Power Apps generates a three-screen app automatically."
+                Product      = "Power Apps"; Category = "Setup"; Audience = "End User"
+                Keywords     = "canvas app, SharePoint app"; Confidence = 5
+                LastReviewed = $ReviewedDate; Owner = $DefaultOwner; Tags = ""; Version = 1
+            },
+            @{
+                Title        = "How do I publish and share a Power Apps canvas app?"
+                Answer       = "Save (Ctrl+S) > Publish. Then File > Share, add users by name or group, and set 'Can use' or 'Can edit'."
+                Product      = "Power Apps"; Category = "Setup"; Audience = "End User"
+                Keywords     = "publish app, share app"; Confidence = 5
+                LastReviewed = $ReviewedDate; Owner = $DefaultOwner; Tags = ""; Version = 1
+            }
+        )
+    },
+
+    @{
+        Name = "FAQ_PowerAutomate"
+        Cols = $FAQ_Cols
+        Items = @(
+            @{
+                Title        = "How do I create a flow triggered by a new SharePoint item?"
+                Answer       = "In make.powerautomate.com > + Create > Automated cloud flow. Search for SharePoint trigger 'When an item is created'."
+                Product      = "Power Automate"; Category = "Setup"; Audience = "End User"
+                Keywords     = "automated flow, SharePoint trigger"; Confidence = 5
+                LastReviewed = $ReviewedDate; Owner = $DefaultOwner; Tags = ""; Version = 1
+            },
+            @{
+                Title        = "What licence is required for Power Automate?"
+                Answer       = "M365-included covers standard connectors only. Per-user plan adds premium connectors and 40,000 API requests/day."
+                Product      = "Power Automate"; Category = "Licensing"; Audience = "IT Admin"
+                Keywords     = "licence, per user, per flow"; Confidence = 5
+                LastReviewed = $ReviewedDate; Owner = $DefaultOwner; Tags = ""; Version = 1
+            }
+        )
+    },
+
+    @{
+        Name = "FAQ_NonM365"
+        Cols = $FAQ_Cols
+        Items = @(
+            @{
+                Title        = "How do I sign in to Zoom using my Microsoft 365 account?"
+                Answer       = "Open Zoom > Sign In > Sign In with SSO. Enter your company SSO domain. You are redirected to the Microsoft 365 login page."
+                Product      = "Zoom"; Category = "Setup"; Audience = "End User"
+                Keywords     = "Zoom SSO, sign in zoom"; Confidence = 5
+                LastReviewed = $ReviewedDate; Owner = $DefaultOwner; Tags = ""; Version = 1
+            },
+            @{
+                Title        = "Why is my Zoom audio not working?"
+                Answer       = "Check: Join with Computer Audio was selected, correct microphone is chosen in Audio Settings, and no other app has the microphone."
+                Product      = "Zoom"; Category = "Troubleshoot"; Audience = "End User"
+                Keywords     = "zoom audio, microphone"; Confidence = 5
+                LastReviewed = $ReviewedDate; Owner = $DefaultOwner; Tags = ""; Version = 1
+            }
+        )
+    }
+)
+
+#endregion
+
+#region ── Main ───────────────────────────────────────────────────────────────
+
+Log-Head "FAQ Hub — Provision & Smoke Test"
+Write-Host "  Site    : $SiteUrl"
+Write-Host "  Started : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+
+# Step 1 — Connect
+Log-Head "Step 1 — Connect to SharePoint"
+try {
+    Connect-PnPOnline -Url $SiteUrl -SPOManagementShell
+    Log-OK "Connected to $SiteUrl"
+}
+catch {
+    Log-Err "Connection failed: $($_.Exception.Message)"
+    Log-Err "Make sure PnP.PowerShell is installed: Install-Module PnP.PowerShell -Scope CurrentUser"
+    return   # use return not exit in ISE — exit closes the ISE host
+}
+
+# Step 2 — Provision FAQ lists
+Log-Head "Step 2 — Provision FAQ Lists"
+foreach ($lst in $Lists) {
+    New-FAQList -ListName $lst.Name -Cols $lst.Cols
+}
+
+# Step 3 — Provision Analytics list
+Log-Head "Step 3 — Provision Analytics List"
+New-FAQList -ListName "FAQ_Analytics" -Cols $Analytics_Cols
+
+# Step 4 — Insert smoke-test items
+Log-Head "Step 4 — Insert Smoke-Test Records (2 per list)"
+foreach ($lst in $Lists) {
+    foreach ($item in $lst.Items) {
+        Add-ListItem -ListName $lst.Name -Values $item
+    }
+}
+
+# Done
+Log-Head "DONE"
+Write-Host "  All lists provisioned and smoke-test records inserted." -ForegroundColor Green
+Write-Host "  Open your site to verify: $SiteUrl" -ForegroundColor Green
+Write-Host "  If everything looks correct, run Step2_LoadFAQData.ps1 next." -ForegroundColor Cyan
+Write-Host ""
+
+#endregion 

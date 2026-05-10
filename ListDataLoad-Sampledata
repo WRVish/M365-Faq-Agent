@@ -1,0 +1,325 @@
+ <#
+    FAQ Data Loader
+    - Connects to SharePoint
+    - Inserts 1 test record into FAQ_SharePoint, reads it back, deletes it
+    - If test passes, loads all FAQ data into all lists
+    SET $TestOnly = $true to just run the test without bulk load
+#>
+
+$SiteUrl     = "https://vishtechtalk.sharepoint.com/sites/DemoSite"
+$Owner       = "admin@vishtechtalk.onmicrosoft.com"
+$Reviewed    = "2026-05-07"
+$TestOnly    = $false   # set to $true to only run the test record
+
+Import-Module SharePointPnPPowerShellOnline -Force -WarningAction SilentlyContinue
+Connect-PnPOnline -Url $SiteUrl -SPOManagementShell
+Write-Host "Connected." -ForegroundColor Green
+
+#region ── Helper ─────────────────────────────────────────────────────────────
+
+function Add-Item {
+    param([string]$List, [hashtable]$Val)
+    try {
+        Add-PnPListItem -List $List -Values $Val -ErrorAction Stop | Out-Null
+        Write-Host "  [OK] $($Val.Title)" -ForegroundColor Green
+    } catch {
+        Write-Host "  [ERR] $($Val.Title) — $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+function New-FAQ {
+    param($Title,$Answer,$Product,$Category,$Audience,$Keywords,$Confidence=4)
+    return @{
+        Title        = $Title
+        Answer       = $Answer
+        Product      = $Product
+        Category     = $Category
+        Audience     = $Audience
+        Keywords     = $Keywords
+        Confidence   = $Confidence
+        LastReviewed = $Reviewed
+        Owner        = $Owner
+        Tags         = ""
+    }
+}
+
+#endregion
+
+#region ── Test Record ────────────────────────────────────────────────────────
+
+Write-Host "`n=== TEST: Insert, verify, delete ===" -ForegroundColor Cyan
+
+$test = New-FAQ "TEST RECORD safe to delete" "Test answer." "SharePoint Online" "Setup" "End User" "test" 5
+try {
+    $item = Add-PnPListItem -List "FAQ_SharePoint" -Values $test -ErrorAction Stop
+    Write-Host "  [OK] Inserted ID=$($item.Id)" -ForegroundColor Green
+    $back = Get-PnPListItem -List "FAQ_SharePoint" -Id $item.Id
+    Write-Host "  [OK] Read back: $($back.FieldValues['Title'])" -ForegroundColor Green
+    Remove-PnPListItem -List "FAQ_SharePoint" -Identity $item.Id -Force
+    Write-Host "  [OK] Deleted. TEST PASSED — proceeding to bulk load." -ForegroundColor Green
+} catch {
+    Write-Host "  [ERR] TEST FAILED: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "  Stopping. Fix the error above before loading data." -ForegroundColor Yellow
+    return
+}
+
+if ($TestOnly) { Write-Host "TestOnly mode — done." -ForegroundColor Yellow; return }
+
+#endregion
+
+#region ── SharePoint Data ────────────────────────────────────────────────────
+
+Write-Host "`n=== Loading FAQ_SharePoint ===" -ForegroundColor Cyan
+$spItems = @(
+    New-FAQ "How do I create a new SharePoint site?" "Go to sharepoint.com and click '+ Create site'. Choose Team site or Communication site, fill in name and privacy, then click Finish." "SharePoint Online" "Setup" "End User" "create site, new site, team site" 5
+    New-FAQ "How do I upload files to SharePoint?" "Drag and drop files onto the library page, or click Upload. To upload folders use the OneDrive sync client." "SharePoint Online" "Setup" "End User" "upload file, add file, drag drop" 5
+    New-FAQ "How do I share a file with a colleague?" "Click the three dots next to the file > Share. Type the colleague name, choose Can view or Can edit, then click Send." "SharePoint Online" "Setup" "End User" "share file, send link, share document" 5
+    New-FAQ "How do I share a file with an external user?" "Click three dots > Share. Change link scope to Specific people or Anyone with the link. Enter external email and set an expiry date." "SharePoint Online" "Access" "End User" "share external, guest link, external user" 5
+    New-FAQ "How do I check previous versions of a document?" "Right-click the file > Version history. Click any version to open read-only. Click Restore to make it current." "SharePoint Online" "Setup" "End User" "version history, restore version, previous version" 5
+    New-FAQ "How do I recover a deleted file?" "Go to the site Recycle Bin in the left navigation. Select the file and click Restore. Check the second-stage recycle bin if not found." "SharePoint Online" "Troubleshoot" "End User" "recover deleted, recycle bin, restore" 5
+    New-FAQ "How do I sync a SharePoint library to my PC?" "Open the library and click Sync. The OneDrive client adds it to File Explorer. Stop sync via OneDrive tray icon > Settings > Account." "SharePoint Online" "Setup" "End User" "sync library, OneDrive sync, offline files" 5
+    New-FAQ "How do I search for files across SharePoint?" "Use the search box at the top of any SharePoint page. Filter results by file type, date, or author." "SharePoint Online" "Setup" "End User" "search, find file, full text search" 5
+    New-FAQ "How do I create an alert for changes to a file?" "Three dots next to file > Alert me. Set trigger type and frequency (immediately, daily, or weekly digest)." "SharePoint Online" "Setup" "End User" "alert, notification, email alert, notify me" 4
+    New-FAQ "Why does a document open as read-only?" "The file may be checked out by another user, or you only have View permissions. Check the checkout status by hovering over the file name." "SharePoint Online" "Troubleshoot" "End User" "read only, cannot edit, checked out, locked" 5
+    New-FAQ "How do I co-author a document with a colleague?" "Both users open the same file from SharePoint in the browser or desktop app. Changes appear in real time and auto-save." "SharePoint Online" "Setup" "End User" "co-author, simultaneous editing, real time" 5
+    New-FAQ "How do I export a SharePoint list to Excel?" "Open the list > Export > Export to Excel. An .iqy file downloads and opens a connected table in Excel." "SharePoint Online" "Setup" "End User" "export Excel, list to Excel, download list" 5
+    New-FAQ "How do I add a Site Collection Administrator?" "Gear > Site settings > Site collection administrators. Add the user email and click OK." "SharePoint Online" "Administration" "Site Admin" "site collection admin, add admin, SCA" 5
+    New-FAQ "How do I change site permissions?" "Gear > Site permissions > Advanced. Grant permissions, edit permission levels, or check a specific user's access." "SharePoint Online" "Access" "Site Admin" "site permissions, permission levels, grant access" 5
+    New-FAQ "How do I enable content approval on a library?" "Library settings > Versioning settings > Content Approval > Yes. Approvers must approve new items before they are visible to readers." "SharePoint Online" "Administration" "Site Admin" "content approval, approve items, draft, pending" 4
+    New-FAQ "How do I enable external sharing for a site?" "SharePoint Admin Centre > Active sites > select site > Sharing. Set the level to Anyone, New and existing guests, or Existing guests only." "SharePoint Online" "Policy" "Site Admin" "external sharing, guest access, sharing policy" 5
+    New-FAQ "How do I configure tenant-level sharing settings?" "SharePoint Admin Centre > Policies > Sharing. Set the tenant default and configure link expiry and permission defaults." "SharePoint Online" "Policy" "IT Admin" "tenant sharing, admin sharing policy, external sharing tenant" 5
+    New-FAQ "How do I audit SharePoint access and activity?" "Microsoft Purview > Audit > New search. Select SharePoint activities, set date range, and export results to CSV." "SharePoint Online" "Administration" "IT Admin" "audit, access log, activity log, Purview, compliance" 5
+    New-FAQ "How do I manage orphaned SharePoint sites?" "SharePoint Admin Centre > Active sites > filter where Owners column is blank. Assign an owner using Set-SPOSite in PowerShell." "SharePoint Online" "Administration" "IT Admin" "orphaned site, no owner, site ownership, governance" 4
+    New-FAQ "How is SharePoint storage quota calculated?" "Each tenant gets 1 TB base plus 10 GB per licensed user. Individual site quotas are set in SharePoint Admin Centre > Active sites." "SharePoint Online" "Licensing" "IT Admin" "storage quota, tenant storage, site storage, capacity" 5
+    New-FAQ "How do I run the SharePoint Migration Tool?" "Download SPMT from aka.ms/spmt. Sign in with M365 admin account. Add source (file share or on-premises), map to destination site and library, then click Migrate." "SharePoint Online" "Administration" "IT Admin" "SPMT, migrate, file share to SharePoint, migration tool" 4
+    New-FAQ "How do I restore a deleted site?" "SharePoint Admin Centre > Deleted sites. Select the site and click Restore. Sites are retained for 93 days before permanent deletion." "SharePoint Online" "Administration" "IT Admin" "restore site, deleted site, site recovery" 5
+    New-FAQ "How do I create and manage content types?" "Gear > Site settings > Site content types > Create. Add columns to it and apply to libraries via Library settings > Add from existing site content types." "SharePoint Online" "Administration" "Site Admin" "content type, site column, document template" 4
+    New-FAQ "How do I prevent users from creating new SharePoint sites?" "SharePoint Admin Centre > Settings > Site creation. Toggle off self-service site creation for users." "SharePoint Online" "Policy" "IT Admin" "restrict site creation, site creation policy, governance" 4
+    New-FAQ "How do I activate SharePoint site features?" "Gear > Site settings > Site Features. Click Activate or Deactivate next to the feature. Test in a non-production environment first." "SharePoint Online" "Administration" "Site Admin" "site features, activate feature, SharePoint features" 4
+    New-FAQ "How do I configure Audience Targeting?" "Library settings > Audience targeting settings > Enable. For news, edit the page > Page details > Audience and set a Microsoft 365 group." "SharePoint Online" "Administration" "Site Admin" "audience targeting, targeted content, personalisation" 4
+    New-FAQ "How do I view site storage usage?" "Gear > Site settings > Storage Metrics. Shows storage used per library. Tenant-wide view is in SharePoint Admin Centre > Reports > Storage." "SharePoint Online" "Administration" "Site Admin" "storage usage, storage metrics, disk space" 4
+    New-FAQ "How do I configure Site Lifecycle Management?" "SharePoint Admin Centre > Settings > Site lifecycle management. Set inactivity threshold, action type, and email notification content." "SharePoint Online" "Policy" "IT Admin" "site lifecycle, inactive site, governance, archive site" 4
+    New-FAQ "What licence is needed for Viva Connections?" "Viva Connections Core is included with all Microsoft 365 plans. Advanced features require a Viva Suite or Viva Connections add-on licence." "SharePoint Online" "Licensing" "IT Admin" "Viva Connections, Viva licence, intranet, employee experience" 4
+    New-FAQ "How do I bulk delete sites using PnP PowerShell?" "Connect-PnPOnline to tenant admin URL. Use Remove-PnPTenantSite with -Force. Pipe a CSV for bulk operations. Always use -WhatIf to preview first." "SharePoint Online" "Administration" "IT Admin" "bulk delete, remove site, PnP PowerShell, tenant admin" 5
+)
+foreach ($i in $spItems) { Add-Item "FAQ_SharePoint" $i }
+
+#endregion
+
+#region ── Teams Data ─────────────────────────────────────────────────────────
+
+Write-Host "`n=== Loading FAQ_Teams ===" -ForegroundColor Cyan
+$teamsItems = @(
+    New-FAQ "How do I create a new Microsoft Teams team?" "Click Teams in the left rail > Join or create a team > Create team. Choose Public or Private, enter name and description." "Teams" "Setup" "End User" "create team, new team, build team" 5
+    New-FAQ "How do I join a Teams team?" "Use an invitation link, search for a public team, or enter a team code via Join or create a team > Join a team with a code." "Teams" "Setup" "End User" "join team, team code, public team, find team" 5
+    New-FAQ "How do I start a chat in Microsoft Teams?" "Click the Chat icon > New chat. Type the person name. For a group chat add multiple people. Press Enter to send." "Teams" "Setup" "End User" "start chat, new chat, direct message, DM" 5
+    New-FAQ "How do I share my screen in a Teams meeting?" "Click the Share icon in the meeting toolbar. Choose Desktop, Window, or Browser tab. Click Stop sharing when done." "Teams" "Setup" "End User" "share screen, present, screen share, share desktop" 5
+    New-FAQ "How do I use background effects in Teams?" "Before joining click Background filters. During a meeting click three dots > Apply background effects. Choose blur or an image." "Teams" "Setup" "End User" "virtual background, background blur, background filter" 5
+    New-FAQ "How do I raise my hand in a Teams meeting?" "Click the React button in the meeting toolbar then click Raise hand. A yellow hand icon appears next to your name." "Teams" "Setup" "End User" "raise hand, meeting hand, turn to speak, lower hand" 5
+    New-FAQ "How do I use breakout rooms in Teams?" "Only organisers can create breakout rooms. Click the Rooms icon in the toolbar, set number of rooms, assign participants, and click Start rooms." "Teams" "Setup" "End User" "breakout rooms, small group, meeting rooms" 4
+    New-FAQ "How do I set my status to Do Not Disturb?" "Click your profile picture > click your current status > Do not disturb. Add priority contacts under Settings > Privacy to allow interruptions." "Teams" "Setup" "End User" "do not disturb, DND, status, focus, mute notifications" 5
+    New-FAQ "How do I translate a Teams message?" "Hover over the message > three dots > Translate. The message translates to your Teams display language." "Teams" "Setup" "End User" "translate message, language, Teams translation" 4
+    New-FAQ "How do I view the meeting transcript?" "Open the Teams Calendar, click the meeting, and find the transcript link in the meeting chat or Files tab." "Teams" "Setup" "End User" "transcript, meeting notes, recording, auto-caption" 5
+    New-FAQ "How do I pin a chat or team in Teams?" "Right-click the conversation or team > Pin. Pinned items appear at the top of the list. Drag to reorder." "Teams" "Setup" "End User" "pin chat, pin team, favourite, bookmark, quick access" 4
+    New-FAQ "How do I use Teams for a phone call?" "Click the Calls icon in the left rail. Dial a number using the dial pad or call from your directory. Requires Teams Phone licence." "Teams" "Setup" "End User" "teams call, phone call, dial number, PSTN, voicemail" 4
+    New-FAQ "How do I manage Teams policies in Teams Admin Centre?" "Go to admin.teams.microsoft.com. Create or edit policies per category and assign to users or groups." "Teams" "Administration" "IT Admin" "teams admin, policy management, meeting policy, assign policy" 5
+    New-FAQ "How do I configure Teams meeting policies?" "Teams Admin Centre > Meetings > Meeting policies. Key settings include recording, transcription, anonymous join, lobby, and screen sharing." "Teams" "Policy" "IT Admin" "meeting policy, recording policy, lobby, anonymous join" 5
+    New-FAQ "How do I set up Teams Phone System and PSTN?" "Assign Phone System licence, choose PSTN connectivity type, acquire numbers in Teams Admin Centre, then assign numbers to users." "Teams" "Setup" "IT Admin" "Teams Phone, PSTN, Calling Plan, Direct Routing, phone number" 5
+    New-FAQ "How do I configure Teams guest access?" "Teams Admin Centre > Org-wide settings > Guest access. Toggle on and configure guest capabilities. Also configure Entra ID external collaboration settings." "Teams" "Policy" "IT Admin" "guest access, external guest, guest settings, Teams guest policy" 5
+    New-FAQ "How do I set Teams retention policies?" "Microsoft Purview > Retention policies > New. Select Teams locations and set the retention period and action." "Teams" "Policy" "IT Admin" "Teams retention, message retention, compliance, Purview" 5
+    New-FAQ "How do I view Teams usage analytics?" "Teams Admin Centre > Analytics and reports > Usage reports. Select report type, set date range, and export to CSV." "Teams" "Administration" "IT Admin" "Teams analytics, usage reports, user activity, admin reports" 4
+    New-FAQ "How do I configure auto-attendant and call queues?" "Teams Admin Centre > Voice > Auto attendants > Add. Configure greeting, business hours routing, and assign a phone number to the resource account." "Teams" "Setup" "IT Admin" "auto attendant, call queue, IVR, voice routing, resource account" 4
+    New-FAQ "How do I troubleshoot Teams meeting quality?" "Teams Admin Centre > Users > select user > Meeting and Calls tab. Click a session to open Call Analytics and review audio, video, and network metrics." "Teams" "Troubleshoot" "IT Admin" "call quality, Call Analytics, CQD, jitter, packet loss, audio" 5
+    New-FAQ "How do I block or allow specific Teams apps?" "Teams Admin Centre > Manage apps. Set app status to Allowed or Blocked. For user-level control create an App permission policy." "Teams" "Policy" "IT Admin" "block app, allow app, Teams apps, permission policy, app governance" 4
+    New-FAQ "How do I manage team settings as a team owner?" "Three dots next to team > Manage team. Configure member permissions, guest permissions, team code, and channel creation rights." "Teams" "Administration" "Site Admin" "team owner, team settings, manage team, member permissions" 5
+    New-FAQ "How do I set up channel moderation?" "In the channel > three dots > Manage channel > Channel moderation > On. Set who can post and designate moderators." "Teams" "Administration" "Site Admin" "channel moderation, restrict posting, moderator, channel settings" 4
+    New-FAQ "What Microsoft 365 plans include Teams?" "Teams is included in Microsoft 365 Business Basic, Standard, Premium, F1, F3, E1, E3, and E5. It is not included in Apps for Business or Apps for Enterprise." "Teams" "Licensing" "IT Admin" "teams licence, plans, teams included, E3, E5, Microsoft 365" 5
+    New-FAQ "What is Teams Premium and what does it add?" "Teams Premium adds AI meeting recap, intelligent search, advanced webinars, branded meeting lobbies, and advanced meeting protection. It is a paid add-on." "Teams" "Licensing" "IT Admin" "Teams Premium, premium licence, meeting recap, AI notes, webinar" 4
+    New-FAQ "How do I request a meeting recap with Copilot?" "After the meeting click the Copilot icon in the meeting chat. Ask for a summary, action items, or decisions. Requires Microsoft 365 Copilot or Teams Premium." "Teams" "Setup" "End User" "copilot recap, meeting summary, Copilot Teams, action items" 4
+    New-FAQ "How do I use the Teams Whiteboard during a meeting?" "Click the Share icon > Microsoft Whiteboard. A shared canvas opens for all participants to draw, type, and add sticky notes. Saved to OneDrive after the meeting." "Teams" "Setup" "End User" "whiteboard, collaborate, drawing, sticky notes, Teams whiteboard" 4
+    New-FAQ "How do I use Teams for a phone call from external number?" "Click Calls in the left rail > dial pad. Enter the full number including country code. Requires Teams Phone licence and assigned number." "Teams" "Setup" "End User" "external call, PSTN, dial pad, phone number, Teams calling" 4
+    New-FAQ "How do I add a co-organiser to a Teams meeting?" "Open the meeting invite in Teams Calendar > Edit > search for the person > change their role to Co-organiser. Co-organisers can manage participants and breakout rooms." "Teams" "Setup" "End User" "co-organiser, meeting role, organiser, meeting permissions" 4
+    New-FAQ "How do I record a Teams meeting?" "During the meeting click three dots > Start recording. All participants are notified. The recording is saved to OneDrive or SharePoint after the meeting ends." "Teams" "Setup" "End User" "record meeting, Teams recording, save recording, cloud recording" 5
+)
+foreach ($i in $teamsItems) { Add-Item "FAQ_Teams" $i }
+
+#endregion
+
+#region ── Power Platform Data ────────────────────────────────────────────────
+
+Write-Host "`n=== Loading FAQ_PowerPlatform ===" -ForegroundColor Cyan
+$ppItems = @(
+    New-FAQ "What is the Microsoft Power Platform?" "Power Platform is Microsoft's low-code suite: Power Apps, Power Automate, Power BI, Power Pages, and Copilot Studio." "Power Platform" "Setup" "All" "what is power platform, overview, low code, suite" 5
+    New-FAQ "How do I create a Power Platform environment?" "Power Platform Admin Centre > Environments > New. Enter name, region, and type. Optionally enable Dataverse and assign a security group." "Power Platform" "Setup" "IT Admin" "create environment, new environment, sandbox, production" 4
+    New-FAQ "What is Dataverse and when should I use it instead of SharePoint?" "Use Dataverse for complex relationships, row-level security, large data volumes, or Dynamics 365 integration. Use SharePoint Lists for simpler, smaller data sets." "Power Platform" "Setup" "Developer" "Dataverse, SharePoint vs Dataverse, when to use Dataverse, tables" 5
+    New-FAQ "How do I set up Power Platform DLP policies?" "Power Platform Admin Centre > Policies > Data policies > New. Classify connectors into Business, Non-Business, or Blocked groups to control data flow." "Power Platform" "Policy" "IT Admin" "DLP policy, data loss prevention, connector policy, governance" 5
+    New-FAQ "How do I restrict who can create environments?" "Power Platform Admin Centre > Settings > Tenant settings > Environment creation. Set production and sandbox creation to Only specific admins." "Power Platform" "Policy" "IT Admin" "restrict environment, environment creation, governance, maker role" 4
+    New-FAQ "How do I import a managed solution?" "make.powerapps.com > Solutions > Import solution > Browse > select .zip > Next. Map connection references and set environment variable values, then click Import." "Power Platform" "Setup" "Developer" "import solution, managed solution, deploy, ALM, zip import" 4
+    New-FAQ "What is the Power Platform CoE Starter Kit?" "The CoE Starter Kit is a free Microsoft governance toolkit with apps, flows, and dashboards for tenant inventory, compliance review, and usage analytics." "Power Platform" "Administration" "IT Admin" "CoE, center of excellence, governance, inventory, starter kit" 4
+    New-FAQ "How do I monitor Power Platform capacity?" "Power Platform Admin Centre > Capacity. View Dataverse storage per environment and API request consumption against licence quota." "Power Platform" "Administration" "IT Admin" "capacity, API limit, storage, consumption, monitoring, quota" 4
+    New-FAQ "What is the difference between managed and unmanaged solutions?" "Unmanaged solutions are editable and used in development. Managed solutions are read-only and used for deployment to test and production environments." "Power Platform" "Setup" "Developer" "managed solution, unmanaged solution, ALM, solution types, deployment" 4
+    New-FAQ "How do I configure environment security groups?" "Power Platform Admin Centre > Environments > select environment > Settings > Users and permissions > Security groups. Assign an Entra ID group to restrict access." "Power Platform" "Access" "IT Admin" "environment security, security group, access control, Dataverse security" 4
+    New-FAQ "What Power Platform licences do I need?" "M365-included covers standard connectors. Power Apps per-user adds premium connectors and full Dataverse. Power Automate per-flow adds 250,000 requests per day per flow." "Power Platform" "Licensing" "IT Admin" "Power Platform licence, pricing, per user, per app, per flow" 5
+    New-FAQ "How do I use Azure Key Vault for secrets in Power Platform?" "Add the Azure Key Vault connector to your flow or app. Use Get secret action. For environment variables of type Secret, reference the Key Vault URI directly." "Power Platform" "Setup" "Developer" "Key Vault, secrets, Azure Key Vault, environment variable, managed identity" 4
+    New-FAQ "How do I share a Power Platform environment with a team?" "Assign an Entra ID security group to the environment in the Admin Centre. Then assign Dataverse Security Roles to control what users can do within apps and data." "Power Platform" "Access" "IT Admin" "share environment, security group, Dataverse roles, access" 4
+    New-FAQ "What is the Default environment in Power Platform?" "Every tenant gets one Default environment automatically. It is shared by all users and cannot be deleted. Avoid storing production apps here — use dedicated environments." "Power Platform" "Setup" "IT Admin" "default environment, tenant environment, shared environment" 4
+    New-FAQ "How do I back up and restore a Power Platform environment?" "Power Platform Admin Centre > Environments > select environment > Backups. System backups are taken automatically every day and retained for 28 days." "Power Platform" "Administration" "IT Admin" "backup, restore environment, disaster recovery, retention" 4
+    New-FAQ "How do I copy a Power Platform environment?" "Power Platform Admin Centre > Environments > select source environment > Copy. Choose target environment and copy type: Full or Minimal." "Power Platform" "Administration" "IT Admin" "copy environment, clone, duplicate environment" 4
+    New-FAQ "How do I reset a sandbox environment?" "Power Platform Admin Centre > Environments > select sandbox > Reset. This wipes all data and customisations and resets it to a clean state." "Power Platform" "Administration" "IT Admin" "reset sandbox, clean environment, wipe data" 4
+    New-FAQ "What is Copilot Studio?" "Copilot Studio (formerly Power Virtual Agents) is Microsoft's low-code tool for building AI-powered chatbots and agents that integrate with Microsoft 365 and custom APIs." "Power Platform" "Setup" "All" "Copilot Studio, Power Virtual Agents, chatbot, AI agent, PVA" 5
+    New-FAQ "How do I view all apps in my tenant?" "Power Platform Admin Centre > Resources > Power Apps. Shows all apps across all environments with owner, last modified, and connector information." "Power Platform" "Administration" "IT Admin" "tenant apps, all apps, admin view, inventory, resources" 4
+    New-FAQ "How do I enable the Power Platform Admin Centre?" "Sign in at admin.powerplatform.microsoft.com with a Global Admin or Power Platform Admin role. No additional setup is required." "Power Platform" "Setup" "IT Admin" "admin centre, PPAC, power platform admin, access admin" 4
+    New-FAQ "What is Power Pages?" "Power Pages is the Power Platform product for building external-facing websites with forms, lists, and authentication backed by Dataverse." "Power Platform" "Setup" "Developer" "Power Pages, external portal, website, Dataverse portal" 4
+    New-FAQ "How do I assign the Power Platform Admin role?" "Microsoft 365 Admin Centre > Users > Active users > select user > Manage roles > Power Platform administrator. This grants full access to the Power Platform Admin Centre." "Power Platform" "Administration" "IT Admin" "admin role, Power Platform admin, assign role, PPAC access" 4
+    New-FAQ "How do I enable Dataverse for an environment?" "When creating a new environment in the Admin Centre, toggle Add a Dataverse data store to Yes. Dataverse cannot be added to an existing non-Dataverse environment." "Power Platform" "Setup" "IT Admin" "enable Dataverse, add Dataverse, Dataverse environment" 4
+    New-FAQ "What are connectors in Power Platform?" "Connectors are pre-built integrations to external services. Standard connectors are included with M365 licences. Premium connectors require a standalone Power Apps or Power Automate licence." "Power Platform" "Setup" "All" "connectors, standard connector, premium connector, integration" 5
+    New-FAQ "How do I find which flows are using a connector?" "Power Platform Admin Centre > Analytics > Power Automate > select environment. Filter by connector to see all flows using it. Useful before blocking a connector via DLP." "Power Platform" "Administration" "IT Admin" "connector usage, flow audit, DLP impact, connector report" 4
+    New-FAQ "How do I enable Power Platform analytics?" "Power Platform Admin Centre > Analytics. Select Power Apps or Power Automate. Choose environment and date range. Data is available after 24-48 hours." "Power Platform" "Administration" "IT Admin" "analytics, reports, usage data, monitoring, telemetry" 4
+    New-FAQ "What is the difference between a flow and a desktop flow?" "Cloud flows run in Microsoft's cloud triggered by connectors or schedules. Desktop flows run on a local Windows machine to automate legacy apps via UI automation." "Power Platform" "Setup" "IT Admin" "cloud flow, desktop flow, RPA, Power Automate Desktop, difference" 4
+    New-FAQ "How do I export Power Platform data for compliance?" "Use Microsoft Purview or the Power Platform Admin Centre Analytics export. For Dataverse data, use the Dataverse export to Azure Data Lake or BYOD feature." "Power Platform" "Policy" "IT Admin" "export data, compliance, Purview, Data Lake, BYOD, Dataverse export" 4
+    New-FAQ "How do I set up Power BI in Power Platform?" "Power BI is licensed separately. Assign a Power BI Pro or Premium Per User licence in the Microsoft 365 Admin Centre. Access Power BI at app.powerbi.com." "Power Platform" "Setup" "IT Admin" "Power BI, BI licence, setup Power BI, reports, dashboards" 4
+    New-FAQ "How do I apply environment routing in Power Platform?" "Environment routing automatically sends makers to a designated developer environment instead of the Default environment. Configure in Admin Centre > Settings > Environment routing." "Power Platform" "Policy" "IT Admin" "environment routing, maker routing, default environment, governance" 3
+)
+foreach ($i in $ppItems) { Add-Item "FAQ_PowerPlatform" $i }
+
+#endregion
+
+#region ── Power Apps Data ────────────────────────────────────────────────────
+
+Write-Host "`n=== Loading FAQ_PowerApps ===" -ForegroundColor Cyan
+$paItems = @(
+    New-FAQ "How do I create a canvas app from a SharePoint list?" "Open the list > Integrate > Power Apps > Create an app. Power Apps generates a three-screen browse, detail, and edit app automatically." "Power Apps" "Setup" "End User" "canvas app, SharePoint app, create app, auto-generate" 5
+    New-FAQ "How do I add a data source to Power Apps?" "In the studio click the Data icon > Add data. Search for the connector, select your connection, and authenticate. Reference it in formulas using the connection name." "Power Apps" "Setup" "End User" "add data source, connector, SharePoint data, data panel" 5
+    New-FAQ "How do I use Patch to save form data in Power Apps?" "Patch(DataSource, Defaults(DataSource), {Column1: TextInput.Text}) creates a new record. Patch(DataSource, LookUp(DataSource, ID=id), {Column1: value}) updates existing." "Power Apps" "Setup" "Developer" "Patch function, save data, create record, update record, Power Fx" 5
+    New-FAQ "How do I navigate between screens in Power Apps?" "Use Navigate(ScreenName, ScreenTransition.None) on a button OnSelect. Use Back() to return. Pass context with the third parameter: Navigate(Screen, None, {item: Gallery.Selected})." "Power Apps" "Setup" "Developer" "navigate, screen navigation, Navigate function, Back, transition" 5
+    New-FAQ "How do I use collections in Power Apps?" "ClearCollect(MyCol, DataSource) fills a collection. Collect adds rows. Remove deletes a row. Collections are in-memory and reset each session unless saved with SaveData." "Power Apps" "Setup" "Developer" "collections, ClearCollect, Collect, in-memory, SaveData, offline" 5
+    New-FAQ "How do I publish and share a canvas app?" "Save > Publish. Then from make.powerapps.com > Apps > select > Share. Add users with Can use or Can edit rights. Share the data source with the same users." "Power Apps" "Setup" "End User" "publish app, share app, distribute, can use, can edit" 5
+    New-FAQ "What is Power Fx?" "Power Fx is the Excel-like formula language in Power Apps. It is declarative and functional. Common functions include Filter, LookUp, Patch, Navigate, If, and Collect." "Power Apps" "Setup" "Developer" "Power Fx, formula, functions, Filter, LookUp, Patch, If, expression" 5
+    New-FAQ "How do I connect Power Apps to Dataverse?" "In the studio > Data panel > Add data > search Dataverse. Select the environment and table. Dataverse supports full delegation unlike SharePoint's 5000-item limit." "Power Apps" "Setup" "Developer" "Dataverse connector, Power Apps Dataverse, delegation, tables" 4
+    New-FAQ "How do I resolve the delegation warning?" "A yellow triangle means only the first 500-2000 rows are processed locally. Fix by indexing the SharePoint column, using Filter on indexed columns, or migrating to Dataverse." "Power Apps" "Troubleshoot" "Developer" "delegation warning, non-delegable, 500 items, row limit, indexed column" 5
+    New-FAQ "How do I add Power Apps to a Teams tab?" "From make.powerapps.com > app > three dots > Add to Teams. In Teams click Apps > Power Apps > Add to a team > select team and channel > choose your app." "Power Apps" "Setup" "End User" "Teams app, Power Apps Teams, add to teams, Teams tab, embed" 5
+    New-FAQ "How do I implement role-based access in Power Apps?" "Use User() to get the current user email. Query a roles list in SharePoint to get their role. Gate UI with Visible or DisplayMode formulas based on the role value." "Power Apps" "Setup" "Developer" "role based access, RBAC, user role, app security, User function" 4
+    New-FAQ "How do I use PCF controls in Power Apps?" "Install Power Platform CLI. Run pac pcf init to scaffold the component. Build with TypeScript. Push to the environment with pac solution push. Add to a model-driven app." "Power Apps" "Setup" "Developer" "PCF, Power Apps Component Framework, code component, TypeScript" 3
+    New-FAQ "Why won't my Power Apps form submit?" "Check: Required fields are filled, connection account has Edit permissions, Patch syntax is correct for new vs update, and inspect Monitor for HTTP 403 or 400 errors." "Power Apps" "Troubleshoot" "Developer" "form not submitting, debug, Monitor, OnFailure, Patch error, 403" 5
+    New-FAQ "What licence is required for Power Apps?" "M365-included allows standard connectors and Teams-hosted apps. Power Apps per-user adds premium connectors and full Dataverse. Per-app licences cover one specific app." "Power Apps" "Licensing" "IT Admin" "Power Apps licence, per user, per app, premium connector, M365" 5
+    New-FAQ "How do I use the Power Apps Monitor tool?" "In Power Apps studio > Advanced > Monitor. Opens a real-time trace panel showing events, formula evaluations, connector calls, and HTTP response codes." "Power Apps" "Troubleshoot" "Developer" "Monitor tool, debug, trace, Power Apps monitor, real-time" 4
+    New-FAQ "How do I create a model-driven app?" "make.powerapps.com > Create > Model-driven app from blank. Select tables from Dataverse. Add forms, views, and dashboards. Model-driven apps require a Dataverse environment." "Power Apps" "Setup" "Developer" "model-driven app, Dataverse app, MDA, forms, views" 4
+    New-FAQ "How do I use variables in Power Apps?" "Set(varName, value) creates or updates a global variable accessible from any screen. UpdateContext({localVar: value}) creates a screen-scoped variable." "Power Apps" "Setup" "Developer" "variables, Set, UpdateContext, global variable, local variable, context" 5
+    New-FAQ "How do I display a loading spinner in Power Apps?" "Set a boolean variable like Set(isLoading, true) before a Patch or Collect call. Overlay a semi-transparent rectangle with a spinner image, Visible set to isLoading." "Power Apps" "Setup" "Developer" "loading spinner, loading indicator, UX, Visible, overlay" 4
+    New-FAQ "How do I validate form inputs in Power Apps?" "Use IsBlank() to check required fields. Set a button DisplayMode to DisplayMode.Disabled if validation fails: DisplayMode.Disabled is(!IsBlank(TextInput.Text), Disabled, Edit)." "Power Apps" "Setup" "Developer" "validation, form validation, IsBlank, required field, DisplayMode" 4
+    New-FAQ "How do I work with date and time in Power Apps?" "Use Now() for current date and time, Today() for date only. Format with Text(Now(), 'dd/mm/yyyy'). Add days with DateAdd(Today(), 7, Days)." "Power Apps" "Setup" "Developer" "date, time, Now, Today, DateAdd, Text function, format date" 4
+    New-FAQ "How do I filter a gallery in Power Apps?" "Set the Items property of the Gallery to Filter(DataSource, TextSearchBox.Text in Title). For multiple conditions use: Filter(DS, Condition1 && Condition2)." "Power Apps" "Setup" "Developer" "filter gallery, search, Items property, Filter function, TextSearchBox" 5
+    New-FAQ "How do I send an email from Power Apps?" "Use the Office365Outlook connector. Call Office365Outlook.SendEmailV2(to, subject, body) in a button OnSelect. The email is sent from the signed-in user's mailbox." "Power Apps" "Setup" "Developer" "send email, Office365Outlook, email connector, SendEmailV2" 4
+    New-FAQ "How do I embed a Power Apps app in a SharePoint page?" "Add a Power Apps web part to the SharePoint page. Paste the app's web link (from make.powerapps.com > Details > Web link) into the web part settings." "Power Apps" "Setup" "End User" "embed Power Apps, SharePoint web part, Power Apps web part, integrate" 4
+    New-FAQ "How do I handle errors in Power Apps?" "Wrap operations in IfError(formula, fallback). Use Notify(FirstError().Message, NotificationType.Error) to show error messages to users." "Power Apps" "Setup" "Developer" "error handling, IfError, FirstError, Notify, try catch Power Apps" 4
+    New-FAQ "How do I use the Camera control in Power Apps?" "Add a Camera control from Insert > Media > Camera. Access the photo via Camera.Photo. Save it using Patch with an image column in SharePoint or Dataverse." "Power Apps" "Setup" "Developer" "camera, photo, image capture, Camera control, mobile app" 4
+    New-FAQ "How do I create a responsive layout in Power Apps?" "Enable modern controls and layout containers. Use HorizontalContainer and VerticalContainer controls. Set sizes using percentages rather than fixed pixel values." "Power Apps" "Setup" "Developer" "responsive layout, containers, mobile, tablet, flexible layout" 4
+    New-FAQ "How do I sort a gallery in Power Apps?" "Set the gallery Items to SortByColumns(DataSource, 'ColumnName', SortOrder.Ascending). Add a toggle button to switch between ascending and descending." "Power Apps" "Setup" "Developer" "sort gallery, SortByColumns, ascending, descending, order" 4
+    New-FAQ "How do I paginate data in Power Apps?" "Use the gallery's built-in scrolling for client-side pagination. For server-side paging set the gallery Items to FirstN(Skip(DataSource, pageSize*(page-1)), pageSize)." "Power Apps" "Setup" "Developer" "pagination, paging, large data, FirstN, Skip, page" 4
+    New-FAQ "How do I run a Power Automate flow from Power Apps?" "In Power Automate create a flow with a PowerApps V2 trigger. In Power Apps add the flow via Data panel > Power Automate. Call it with FlowName.Run(params) in OnSelect." "Power Apps" "Setup" "Developer" "Power Automate, flow from app, PowerApps trigger, Run function" 5
+    New-FAQ "How do I use themes and branding in Power Apps?" "Go to File > Settings > Appearance to select a theme. For custom branding set fill colours and font properties on individual controls or use a top-level colour variable set in App.OnStart." "Power Apps" "Setup" "End User" "theme, branding, colours, appearance, custom style, app design" 3
+)
+foreach ($i in $paItems) { Add-Item "FAQ_PowerApps" $i }
+
+#endregion
+
+#region ── Power Automate Data ────────────────────────────────────────────────
+
+Write-Host "`n=== Loading FAQ_PowerAutomate ===" -ForegroundColor Cyan
+$automateItems = @(
+    New-FAQ "How do I create a flow triggered by a new SharePoint item?" "make.powerautomate.com > Create > Automated cloud flow. Select the SharePoint trigger When an item is created. Configure site URL and list name." "Power Automate" "Setup" "End User" "automated flow, SharePoint trigger, when item created, auto flow" 5
+    New-FAQ "How do I create a button flow to trigger manually?" "Create > Instant cloud flow. Choose Manually trigger a flow. Add inputs if needed. Run from the Power Automate app in Teams or from SharePoint via Integrate > Power Automate." "Power Automate" "Setup" "End User" "instant flow, button flow, manual trigger, run flow, instant" 5
+    New-FAQ "How do I set up a scheduled flow?" "Create > Scheduled cloud flow. Set start date, recurrence interval, and days of the week. Flows run under the connection owner's credentials even when no user is signed in." "Power Automate" "Setup" "End User" "scheduled flow, daily flow, weekly, recurring, timed flow" 5
+    New-FAQ "How do I send an adaptive card to Teams from Power Automate?" "Add the Teams action Post adaptive card in a chat or channel. Build the card JSON at adaptivecards.io/designer and paste it. Use Post and wait to capture user responses." "Power Automate" "Setup" "Developer" "adaptive card, Teams card, card JSON, post card, Teams bot" 5
+    New-FAQ "How do I call an external REST API from Power Automate?" "Add the HTTP action (premium). Set method, URI, headers, and body. Follow with Parse JSON action to convert the response into dynamic content for subsequent steps." "Power Automate" "Setup" "Developer" "HTTP action, REST API, external API, Parse JSON, API call, premium" 5
+    New-FAQ "How do I use expressions and functions in Power Automate?" "Click Expression tab in the dynamic content picker. Common functions: concat(), formatDateTime(), utcNow(), addDays(), length(), coalesce(), if(), outputs()." "Power Automate" "Setup" "Developer" "expressions, functions, concat, formatDateTime, coalesce, dynamic content" 5
+    New-FAQ "How do I use condition and switch branching?" "Condition action adds a true/false branch. Switch evaluates one value against multiple cases. Avoid nesting more than 3 levels deep — use Scope actions to keep flows readable." "Power Automate" "Setup" "Developer" "condition, switch, branch, if else, control flow, parallel branch" 5
+    New-FAQ "How do I read and update SharePoint list items in Power Automate?" "Get items action retrieves a list with optional OData filter. Get item retrieves by ID. Update item updates specific columns. Create item and Delete item are also available." "Power Automate" "Setup" "Developer" "get items, create item, update item, delete item, SharePoint, OData, CRUD" 5
+    New-FAQ "How do I add error handling to a Power Automate flow?" "Wrap steps in a Try Scope. Add a Catch Scope with Configure run after set to has failed. In Catch, log the error or send an email. Use result() to get the error message." "Power Automate" "Setup" "Developer" "error handling, try catch, configure run after, scope, retry, exception" 5
+    New-FAQ "How do I paginate through large SharePoint lists?" "In Get items settings enable Pagination and set a Threshold up to 100000. For very large lists use OData filter to narrow the result set before paginating." "Power Automate" "Setup" "Developer" "pagination, large list, 5000 items, Get items, threshold, Do Until" 4
+    New-FAQ "How do I test and debug a Power Automate flow?" "Use the Test button to run manually. Check the 28-day run history by clicking the flow. Each action shows its input, output, and duration. Add Compose actions to inspect values." "Power Automate" "Troubleshoot" "Developer" "test flow, debug, run history, failed run, Compose, inspect, troubleshoot" 5
+    New-FAQ "Why is my flow being throttled with a 429 error?" "429 means too many API requests. Fix by adding Delay actions inside loops, enabling concurrency control in Apply to each, or upgrading to a higher licence tier." "Power Automate" "Troubleshoot" "Developer" "429 throttling, too many requests, rate limit, API quota, delay, throttle" 5
+    New-FAQ "How do I trigger a Power Automate flow from Power Apps?" "Create a flow with a PowerApps V2 trigger and define input parameters. In Power Apps add the flow and call it with FlowName.Run(param1, param2) in button OnSelect." "Power Automate" "Setup" "Developer" "Power Apps trigger, flow from app, PowerApps V2, Run function, integrate" 5
+    New-FAQ "What is the difference between cloud flows and desktop flows?" "Cloud flows run in Microsoft's cloud triggered by connectors. Desktop flows use Power Automate for Desktop to automate local Windows apps via UI automation and RPA." "Power Automate" "Setup" "IT Admin" "desktop flow, cloud flow, RPA, Power Automate Desktop, PAD, difference" 4
+    New-FAQ "What licence is required for Power Automate?" "M365-included covers standard connectors at 6000 requests per day. Per-user plan adds premium connectors and 40000 requests. Per-flow plan provides 250000 requests per flow per day." "Power Automate" "Licensing" "IT Admin" "Power Automate licence, per user, per flow, premium connector, API requests" 5
+    New-FAQ "How do I share or transfer ownership of a flow?" "My flows > select flow > Share > add co-owner. To transfer: export the flow as a zip, import under the new owner, or use admin PowerShell Set-AdminFlowOwnerRole." "Power Automate" "Access" "IT Admin" "transfer flow, share flow, co-owner, flow ownership, reassign" 4
+    New-FAQ "How do I approval flow in Power Automate?" "Add the Approvals connector action Start and wait for an approval. Set approver email, title, and details. The approver receives an email and can respond from Outlook or Teams." "Power Automate" "Setup" "End User" "approval, approvals connector, approve, reject, sign off" 5
+    New-FAQ "How do I loop through items in Power Automate?" "Use Apply to each action. Drop it on the output array from Get items or Parse JSON. All actions inside the loop run once per item. Configure concurrency to run items in parallel." "Power Automate" "Setup" "Developer" "apply to each, loop, iterate, array, foreach, parallel" 5
+    New-FAQ "How do I use variables in Power Automate?" "Add Initialize variable action before any branch. Supported types: String, Integer, Float, Boolean, Array, Object. Update with Set variable. Increment with Increment variable." "Power Automate" "Setup" "Developer" "variables, initialize variable, set variable, increment, string, array" 5
+    New-FAQ "How do I send an email with an attachment from Power Automate?" "Use Office 365 Outlook Send an email V2 action. In the Attachments section add Name and Content. Get file content using Get file content action from SharePoint or OneDrive." "Power Automate" "Setup" "End User" "send email, attachment, Office 365 Outlook, email with file, Send V2" 4
+    New-FAQ "How do I trigger a flow when a SharePoint column value changes?" "Use When an item is created or modified trigger. Add a condition to check if the specific column value equals your target. Use the triggerOutputs to compare old and new values." "Power Automate" "Setup" "Developer" "column change trigger, modified, SharePoint trigger, condition, value change" 4
+    New-FAQ "How do I format dates in Power Automate?" "Use formatDateTime(utcNow(), 'dd/MM/yyyy') in an expression. For UK format use dd/MM/yyyy. For ISO use yyyy-MM-dd. Add hours with addHours(utcNow(), 8) for time zone offsets." "Power Automate" "Setup" "Developer" "format date, formatDateTime, date expression, time zone, utcNow" 5
+    New-FAQ "How do I create a Do Until loop in Power Automate?" "Add a Do Until action. Set the exit condition, for example a variable equals Done. Add a Limit count and timeout to prevent infinite loops. Update the variable inside the loop." "Power Automate" "Setup" "Developer" "Do Until, loop, retry, poll, condition loop, exit condition" 4
+    New-FAQ "How do I read data from an Excel file in Power Automate?" "Use the Excel Online Business connector. Action List rows present in a table requires the file to be in OneDrive or SharePoint and the data to be formatted as an Excel table." "Power Automate" "Setup" "Developer" "Excel, read Excel, Excel Online, list rows, table, OneDrive" 4
+    New-FAQ "How do I post a message to a Teams channel from Power Automate?" "Add the Microsoft Teams action Post message in a chat or channel. Set Post as to Flow bot or User. Set Team and Channel. Enter the message in the Message field." "Power Automate" "Setup" "End User" "post Teams message, Teams notification, channel message, flow bot" 5
+    New-FAQ "How do I copy a file from SharePoint to another location?" "Use the SharePoint Get file content action followed by Create file action targeting the destination site and folder. Use the source file name in the File Name field." "Power Automate" "Setup" "Developer" "copy file, move file, SharePoint file, create file, get file content" 4
+    New-FAQ "How do I parse JSON in Power Automate?" "Add the Parse JSON action. Paste a sample JSON payload and click Generate from sample to auto-create the schema. The parsed properties become available as dynamic content." "Power Automate" "Setup" "Developer" "Parse JSON, JSON schema, dynamic content, sample payload, generate schema" 5
+    New-FAQ "How do I filter an array in Power Automate?" "Use the Filter array action under Data Operations. Set From to your array and configure the condition. Returns only items matching the condition." "Power Automate" "Setup" "Developer" "filter array, Data Operations, array filter, subset, condition" 4
+    New-FAQ "How do I use Select action in Power Automate?" "Data Operations > Select. Map From array to a new shape. Use expressions in the Map fields to rename or transform columns. Output is a new array with the mapped structure." "Power Automate" "Setup" "Developer" "Select action, map array, transform, reshape, Data Operations, projection" 4
+    New-FAQ "How do I monitor all flows in the tenant as an admin?" "Power Platform Admin Centre > Analytics > Power Automate. View run counts, errors, and top flows by environment. Use the Power Automate Management connector for custom reporting." "Power Automate" "Administration" "IT Admin" "admin monitor, tenant flows, flow analytics, error report, management connector" 4
+)
+foreach ($i in $automateItems) { Add-Item "FAQ_PowerAutomate" $i }
+
+#endregion
+
+#region ── NonM365 (Zoom) Data ────────────────────────────────────────────────
+
+Write-Host "`n=== Loading FAQ_NonM365 ===" -ForegroundColor Cyan
+$zoomItems = @(
+    New-FAQ "How do I sign in to Zoom using my Microsoft 365 account?" "Open Zoom > Sign In > Sign In with SSO. Enter the company SSO domain. You are redirected to the Microsoft 365 login page to complete authentication." "Zoom" "Setup" "End User" "zoom SSO, sign in zoom, Microsoft 365 Zoom, single sign-on" 5
+    New-FAQ "How do I schedule a Zoom meeting and invite attendees?" "Open Zoom > Schedule. Fill in topic, date, time, and duration. Select Outlook under Calendar to auto-create the calendar invitation. Click Schedule." "Zoom" "Setup" "End User" "schedule zoom, zoom meeting, zoom invite, create meeting, recurring" 5
+    New-FAQ "How do I join a Zoom meeting without the app installed?" "Open the meeting link in Chrome or Edge. Click Join from your browser at the bottom of the page. Basic features are available but full app experience is recommended." "Zoom" "Setup" "End User" "join zoom browser, join without app, zoom web, browser join" 5
+    New-FAQ "How do I use Zoom reactions and non-verbal feedback?" "Click Reactions in the toolbar. Emoji reactions appear briefly. Non-verbal feedback like Raise Hand stays until cleared. Host can clear all feedback via the Participants panel." "Zoom" "Setup" "End User" "reactions, raise hand, emoji, non-verbal feedback, thumbs up" 4
+    New-FAQ "How do I use Zoom Breakout Rooms?" "Only the host or co-host can create breakout rooms. Click Breakout Rooms in the toolbar, set the number of rooms, assign participants, and click Open rooms." "Zoom" "Setup" "End User" "breakout rooms, small groups, separate, host, co-host, Zoom breakout" 4
+    New-FAQ "How do I co-host a Zoom meeting?" "Co-hosting must be enabled in Zoom account settings. During a meeting click Participants > hover over a participant > More > Make Co-Host." "Zoom" "Access" "End User" "co-host, zoom co-host, host permissions, manage meeting, make co-host" 4
+    New-FAQ "How do I record a Zoom meeting and where is it saved?" "During a meeting click Record > Record to Cloud. After the meeting cloud recordings are processed and accessible at zoom.us > Recordings. Download within 30 days." "Zoom" "Setup" "End User" "zoom recording, cloud recording, record meeting, save recording" 5
+    New-FAQ "How do I enable closed captions in Zoom?" "Host clicks the arrow next to CC > Enable Auto-Transcription. Participants can show or hide captions. Requires a Zoom Business or Enterprise account and admin setting enabled." "Zoom" "Setup" "End User" "closed captions, live transcription, CC, auto-transcription, accessibility" 4
+    New-FAQ "How do I configure the Zoom waiting room?" "zoom.us > Settings > Security > enable Waiting room. Options: All participants or Guests only. During a meeting: Participants panel > Admit or Admit All." "Zoom" "Setup" "End User" "waiting room, admit participant, guest screening, lobby, security" 4
+    New-FAQ "Why is my Zoom audio not working?" "Check: Join with Computer Audio was selected, correct microphone is chosen in Audio Settings, no other app has the microphone, and system volume is not muted." "Zoom" "Troubleshoot" "End User" "zoom audio, no sound, microphone, speaker, audio not working" 5
+    New-FAQ "Why is my Zoom camera not working?" "Another app may have the camera. Check video settings, update Zoom, verify camera privacy permissions in Windows Settings > Privacy > Camera > Zoom is On." "Zoom" "Troubleshoot" "End User" "zoom video, camera not working, webcam, camera permission, video issue" 5
+    New-FAQ "Why can't I join a Zoom meeting?" "Common causes: outdated Zoom, wrong meeting ID or password, meeting not started by host yet, or firewall blocking Zoom ports. Try joining from your browser as a fallback." "Zoom" "Troubleshoot" "End User" "can't join zoom, meeting error, join failed, meeting ID, zoom stuck" 5
+    New-FAQ "Why is Zoom screen sharing not working on Mac?" "Mac requires screen recording permission for Zoom. Fix: System Preferences > Security and Privacy > Screen Recording > check Zoom. Restart Zoom after granting permission." "Zoom" "Troubleshoot" "End User" "screen sharing Mac, screen recording permission, Mac Zoom, macOS" 5
+    New-FAQ "How do I configure screen sharing permissions for participants?" "As host click the arrow next to Share Screen > Advanced Sharing Options. Set Who can share to Host Only or All Participants." "Zoom" "Access" "End User" "screen sharing, host only, allow sharing, disable sharing, security" 4
+    New-FAQ "How do I request a Zoom licence upgrade from Basic to Pro?" "Submit a request via the IT helpdesk with your name, email, department, and business justification. You will receive an activation email from Zoom once assigned." "Zoom" "Licensing" "End User" "zoom licence, get zoom, zoom request, zoom pro, zoom basic, IT request" 5
+    New-FAQ "What is our Zoom recording and data retention policy?" "Cloud recordings are retained for 30 days then auto-deleted. Download important recordings from zoom.us > Recordings and upload to SharePoint or OneDrive for long-term storage." "Zoom" "Policy" "End User" "zoom recording retention, 30 days, download recording, SharePoint storage, data policy" 5
+    New-FAQ "What is the maximum meeting duration and participant count for Zoom?" "Zoom Basic has a 40-minute limit for group meetings with 100 participants. Pro allows unlimited duration with 100 participants. Business supports up to 300 participants." "Zoom" "Policy" "End User" "zoom limit, 40 minutes, participants, meeting duration, Basic Pro Business" 5
+    New-FAQ "How do I configure Zoom for accessibility?" "Enable automated captions in zoom.us > Settings > In Meeting Advanced > Automated captions. Use Alt+A to mute, Alt+V for video, Alt+S for screen share. Compatible with NVDA and VoiceOver." "Zoom" "Setup" "End User" "accessibility, closed captions, screen reader, NVDA, keyboard shortcuts" 4
+    New-FAQ "How do I manage Zoom user accounts as an admin?" "zoom.us > Admin > User Management > Users. Add, edit, deactivate, or delete users. Change licence type and roles. Configure SCIM provisioning for automated Entra ID sync." "Zoom" "Administration" "IT Admin" "zoom admin, manage users, licence management, deactivate zoom, SCIM" 4
+    New-FAQ "How do I configure Zoom SSO with Microsoft 365?" "In Entra ID create a Zoom enterprise application and configure SAML SSO. Copy the federation metadata to the Zoom SSO settings. Enable SCIM for automated account provisioning." "Zoom" "Setup" "IT Admin" "Zoom SSO, Entra ID, Azure AD, SAML, federated login, SCIM, auto-provision" 4
+    New-FAQ "How do I integrate Zoom recordings with SharePoint?" "Option 1: Power Automate flow using Zoom API to download and upload recordings to SharePoint. Option 2: Connect Zoom to OneDrive in zoom.us > Settings > Recording > Connect to Cloud Storage." "Zoom" "Setup" "IT Admin" "zoom recordings SharePoint, archive recordings, OneDrive integration, Zoom API" 4
+    New-FAQ "How do I enable or disable Zoom features for all users?" "zoom.us > Admin > Account Settings. Toggle features on or off at the account level. Locked settings cannot be changed by individual users or group admins." "Zoom" "Administration" "IT Admin" "zoom account settings, disable feature, lock setting, admin control" 4
+    New-FAQ "How do I set up Zoom Webinar?" "Purchase a Zoom Webinar add-on licence via IT. Schedule a webinar in zoom.us > Webinars > Schedule a Webinar. Set registration, panelists, Q&A, and polling options." "Zoom" "Setup" "IT Admin" "zoom webinar, webinar licence, schedule webinar, panelist, registration" 4
+    New-FAQ "How do I use Zoom Polls during a meeting?" "Host clicks Polls in the meeting toolbar. Create a poll with single or multiple choice questions. Launch it during the meeting. View results in real time and share them with participants." "Zoom" "Setup" "End User" "zoom poll, polling, meeting poll, survey, questions" 4
+    New-FAQ "How do I use Zoom Chat outside of meetings?" "Open the Zoom app > Chat tab. Create one-on-one or group channels. Share files, images, and links. Channels persist between meetings and are separate from meeting chat." "Zoom" "Setup" "End User" "zoom chat, team chat, channel, messaging, file share, outside meeting" 4
+    New-FAQ "How do I transfer host controls during a Zoom meeting?" "Click Participants > hover over the participant > More > Make Host. You become a co-host after transferring. Only one person can be the host at a time." "Zoom" "Access" "End User" "transfer host, make host, host controls, pass host, co-host" 4
+    New-FAQ "How do I remove a disruptive participant from a Zoom meeting?" "Click Participants > hover over the participant > Remove. They cannot rejoin unless you allow it in Security settings. Use the Security button to lock the meeting to prevent rejoining." "Zoom" "Access" "End User" "remove participant, kick, disruptive, security, lock meeting" 5
+    New-FAQ "How do I use Zoom virtual background on a low-spec PC?" "If your PC does not meet the virtual background hardware requirements, Zoom shows a warning. Use a physical green screen to enable backgrounds on lower-spec hardware." "Zoom" "Setup" "End User" "virtual background, green screen, low spec, hardware requirement, background" 4
+    New-FAQ "How do I update Zoom to the latest version?" "Open Zoom > click your profile picture > Check for Updates. If an update is available click Update. Keeping Zoom updated ensures access to the latest security patches and features." "Zoom" "Setup" "End User" "update zoom, zoom version, check for updates, latest version, upgrade zoom" 5
+    New-FAQ "How do I enable two-factor authentication for Zoom?" "zoom.us > Admin > Advanced > Security > Two-factor authentication > Enable. Users can use an authenticator app or SMS. Applies to all users signing in with Zoom credentials." "Zoom" "Policy" "IT Admin" "two factor, 2FA, MFA, security, authenticator, zoom security" 4
+)
+foreach ($i in $zoomItems) { Add-Item "FAQ_NonM365" $i }
+
+#endregion
+
+#region ── Update Default Views ───────────────────────────────────────────────
+
+Write-Host "`n=== Updating Default Views ===" -ForegroundColor Cyan
+
+$faqLists = @("FAQ_SharePoint","FAQ_Teams","FAQ_PowerPlatform","FAQ_PowerApps","FAQ_PowerAutomate","FAQ_NonM365")
+$faqViewFields = @("Title","Product","Category","Audience","Confidence","LastReviewed","Owner")
+
+foreach ($lst in $faqLists) {
+    try {
+        $view = Get-PnPView -List $lst -Identity "All Items" -ErrorAction SilentlyContinue
+        if ($null -eq $view) { $view = Get-PnPView -List $lst | Select-Object -First 1 }
+        Set-PnPView -List $lst -Identity $view.Title -Fields $faqViewFields | Out-Null
+        Write-Host "  [OK] View updated: $lst" -ForegroundColor Green
+    } catch {
+        Write-Host "  [WARN] Could not update view for $lst : $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+#endregion
+
+Write-Host "`n=== ALL DONE ===" -ForegroundColor Cyan
+Write-Host "  Open your site to verify: $SiteUrl" -ForegroundColor Green 
