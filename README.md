@@ -232,4 +232,4 @@ MIT — free to use, adapt, and build on. Attribution appreciated but not requir
 
 ---
 
-*Built by [Vish](https://wrvishnu.com) — Singapore, May 2026*
+*Built by [Vish](https://wrvishnu.com) - May 2026*
